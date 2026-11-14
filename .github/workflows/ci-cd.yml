@@ -127,10 +127,14 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - name: Build
-        run: npm run build && find dist -name "*.map" -delete
+        run: npm run build
         env:
           VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
           VITE_SENTRY_ENVIRONMENT: staging
+          VITE_RELEASE: ${{ github.sha }}
+      - name: Upload source maps to Sentry
+        run: bash scripts/sentry-sourcemaps.sh
+        env:
           VITE_RELEASE: ${{ github.sha }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ vars.SENTRY_ORG }}
@@ -152,6 +156,15 @@ jobs:
           NYT_API_KEY: ${{ secrets.NYT_API_KEY }}
       - name: Post-deploy check
         run: bash scripts/post-deploy-check.sh "${{ steps.deploy.outputs.url }}"
+      # La release su Sentry riceve il deploy: gli errori nuovi dopo questo
+      # momento si collegano a questo commit e a questo ambiente.
+      - name: Record the deploy on Sentry
+        if: env.SENTRY_AUTH_TOKEN != ''
+        run: npx sentry-cli deploys new --release "$GITHUB_SHA" --env staging --url "${{ steps.deploy.outputs.url }}"
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
 
   deploy-production:
     name: Deploy production (Netlify)
@@ -169,10 +182,14 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - name: Build
-        run: npm run build && find dist -name "*.map" -delete
+        run: npm run build
         env:
           VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
           VITE_SENTRY_ENVIRONMENT: production
+          VITE_RELEASE: ${{ github.sha }}
+      - name: Upload source maps to Sentry
+        run: bash scripts/sentry-sourcemaps.sh
+        env:
           VITE_RELEASE: ${{ github.sha }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ vars.SENTRY_ORG }}
@@ -194,3 +211,12 @@ jobs:
           NYT_API_KEY: ${{ secrets.NYT_API_KEY }}
       - name: Post-deploy check
         run: bash scripts/post-deploy-check.sh "${{ steps.deploy.outputs.url }}"
+      # La release su Sentry riceve il deploy: gli errori nuovi dopo questo
+      # momento si collegano a questo commit e a questo ambiente.
+      - name: Record the deploy on Sentry
+        if: env.SENTRY_AUTH_TOKEN != ''
+        run: npx sentry-cli deploys new --release "$GITHUB_SHA" --env production --url "${{ steps.deploy.outputs.url }}"
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}

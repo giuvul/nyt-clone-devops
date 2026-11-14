@@ -1,4 +1,3 @@
-import { sentryVitePlugin } from "@sentry/vite-plugin";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { createMemoryCache, handleNytRequest } from "./server/nytProxy.js";
@@ -29,29 +28,14 @@ function nytApiProxy(apiKey) {
 
 export default defineConfig(({ mode }) => {
   // Senza prefisso VITE_ la variabile non entra mai nel bundle del browser.
-  const env = { ...loadEnv(mode, process.cwd(), ""), ...process.env };
-
-  // Caricamento delle mappe sorgente su Sentry: solo in CI, quando il token
-  // (GitHub Secret SENTRY_AUTH_TOKEN) è presente. Dopo l'upload le mappe
-  // vengono cancellate da dist, così non finiscono sul sito pubblico.
-  const uploadSourceMaps = Boolean(env.SENTRY_AUTH_TOKEN && env.SENTRY_ORG && env.SENTRY_PROJECT);
+  const env = loadEnv(mode, process.cwd(), "");
 
   return {
-    plugins: [
-      react(),
-      nytApiProxy(env.NYT_API_KEY),
-      uploadSourceMaps &&
-        sentryVitePlugin({
-          authToken: env.SENTRY_AUTH_TOKEN,
-          org: env.SENTRY_ORG,
-          project: env.SENTRY_PROJECT,
-          release: { name: env.VITE_RELEASE },
-          sourcemaps: { filesToDeleteAfterUpload: ["./dist/**/*.map"] },
-          telemetry: false,
-        }),
-    ],
+    plugins: [react(), nytApiProxy(env.NYT_API_KEY)],
     build: {
       // Mappe "hidden": generate per Sentry ma non collegate dai file JS.
+      // Dopo il build la CI le carica su Sentry con sentry-cli e le cancella
+      // (scripts/sentry-sourcemaps.sh): non finiscono mai sul sito pubblico.
       sourcemap: "hidden",
       rolldownOptions: {
         output: {

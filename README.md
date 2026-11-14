@@ -192,9 +192,9 @@ Stories*, *Most Popular* e *Article Search* e copia la **Key**.
 | `NYT_API_KEY` | **sì** | `.env` | GitHub Secret | proxy (Vite / container `api` / Netlify Function) |
 | `NETLIFY_AUTH_TOKEN` | **sì** | — | GitHub Secret | Netlify CLI nel job di deploy |
 | `NETLIFY_SITE_ID` | poco | — | GitHub Secret | Netlify CLI |
-| `SENTRY_AUTH_TOKEN` | **sì** | — | GitHub Secret | plugin Sentry di Vite (upload source map) |
+| `SENTRY_AUTH_TOKEN` | **sì** | — | GitHub Secret | `sentry-cli` nel job di deploy (release e source map) |
 | `VITE_SENTRY_DSN` | no¹ | `.env` | GitHub Secret | bundle del browser |
-| `SENTRY_ORG`, `SENTRY_PROJECT` | no | — | GitHub Variables | plugin Sentry |
+| `SENTRY_ORG`, `SENTRY_PROJECT` | no | — | GitHub Variables | `sentry-cli` |
 
 ¹ Il DSN di Sentry finisce per forza nel JavaScript pubblico: permette solo di *inviare* eventi. Lo
 tengo comunque fuori dal codice, così si cambia senza toccare i sorgenti.
@@ -283,14 +283,26 @@ Altri dettagli:
 I job `deploy-staging` e `deploy-production` fanno la stessa cosa con parametri diversi:
 
 1. `npm ci` e `npm run build` con le variabili dell'ambiente (`VITE_SENTRY_ENVIRONMENT`,
-   `VITE_RELEASE` = SHA del commit). Se c'è `SENTRY_AUTH_TOKEN`, il plugin Sentry carica le source
-   map e le cancella da `dist/`.
-2. `scripts/check-dist.sh`: nessun segreto e nessuna source map nei file pubblici.
-3. `netlify deploy --no-build --dir=dist --functions=netlify/functions` con `--prod` (production) o
+   `VITE_RELEASE` = SHA del commit).
+2. `scripts/sentry-sourcemaps.sh`: con `sentry-cli` crea la release su Sentry, inserisce un *debug
+   id* in ogni file JS e nella sua mappa, carica le source map, chiude la release e cancella le mappe
+   da `dist/`.
+3. `scripts/check-dist.sh`: nessun segreto e nessuna source map nei file pubblici.
+4. `netlify deploy --no-build --dir=dist --functions=netlify/functions` con `--prod` (production) o
    `--alias=staging` (staging). La chiave NYT passa alla function con `--secret-env`.
-4. `scripts/post-deploy-check.sh`: chiama l'URL appena pubblicato e `/api/topstories/home` fino a
+5. `scripts/post-deploy-check.sh`: chiama l'URL appena pubblicato e `/api/topstories/home` fino a
    ottenere `200` da entrambi. Se il sito è online ma la function non raggiunge il NYT (chiave
    sbagliata, per esempio) il job diventa rosso.
+6. `sentry-cli deploys new`: registra il deploy sulla release, così Sentry sa quando ogni versione è
+   andata online e in quale ambiente.
+
+**Source map: un problema trovato e risolto.** All'inizio usavo il plugin ufficiale
+`@sentry/vite-plugin`. L'upload riusciva, ma gli stack trace su Sentry puntavano ai file sbagliati
+(l'errore di `DebugPage.jsx` risultava in `Axios.js`). Confrontando il JavaScript pubblicato con un
+build locale ho visto che il plugin inseriva il suo codice in testa alla riga 1 senza aggiornare le
+mappe: con il nuovo bundler di Vite 8 (Rolldown) tutte le colonne della prima riga risultavano
+spostate di 415 caratteri. Sono passato a `sentry-cli sourcemaps inject`, che lavora dopo il build e
+modifica insieme file e mappe (le mappe iniziano con `;;`, cioè le due righe aggiunte).
 
 L'URL del deploy appare nella pagina della run e in *Environments* del repository.
 
@@ -373,6 +385,7 @@ ignorare o risolvere.
 │   ├── nytProxy.js                proxy: chiave, endpoint ammessi, cache, errori
 │   └── index.js                   server HTTP del proxy per Docker, con /healthz
 ├── scripts/
+│   ├── sentry-sourcemaps.sh       release Sentry, upload e rimozione delle source map
 │   ├── check-dist.sh              nessun segreto e nessuna source map nei file pubblici
 │   └── post-deploy-check.sh       il sito e l'API rispondono dopo il deploy
 ├── src/
