@@ -19,8 +19,7 @@ export default defineConfig([
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
     rules: {
-      // I componenti usati solo in JSX iniziano con la maiuscola.
-      "no-unused-vars": ["error", { varsIgnorePattern: "^[A-Z_]" }],
+      "no-unused-vars": "error",
       "no-console": ["warn", { allow: ["warn", "error", "info"] }],
     },
   },
