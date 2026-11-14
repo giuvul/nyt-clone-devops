@@ -9,7 +9,7 @@ import styles from "./SimplePage.module.css";
 // 2. errore durante il render: lo intercetta l'ErrorBoundary, che mostra la
 //    pagina di errore e lo invia a Sentry.
 function Exploding() {
-  throw new Error("Sentry test: render error from /debug/sentry");
+  throw new Error("Sentry test error: render error from /debug/sentry");
 }
 
 export default function DebugPage() {
@@ -22,7 +22,7 @@ export default function DebugPage() {
     // setTimeout porta l'errore fuori dal gestore di React: diventa un
     // errore non gestito vero e proprio, come un bug in produzione.
     setTimeout(() => {
-      throw new Error(`Sentry test: unhandled error from /debug/sentry (${new Date().toISOString()})`);
+      throw new Error(`Sentry test error: unhandled error from /debug/sentry (${new Date().toISOString()})`);
     });
   }
 

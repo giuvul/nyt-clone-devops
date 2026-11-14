@@ -341,7 +341,7 @@ trace leggibile (grazie alle source map caricate dalla pipeline).
 | **Sentry: picco di eventi** | molti errori in poco tempo | quasi sempre l'API NYT (rete, limite): controllare il monitor keyword; se è giù anche quello, la causa è il back end, non il front end. |
 | **GitHub: pipeline rossa** | il codice non è arrivato online | il job rosso dice dove: lint, test, segreti, container o deploy. Il sito in produzione resta quello dell'ultima run verde. |
 
-Gli eventi con `"Sentry test:"` nel messaggio sono quelli generati da `/debug/sentry`: si possono
+Gli eventi con `"Sentry test error"` nel messaggio sono quelli generati da `/debug/sentry`: si possono
 ignorare o risolvere.
 
 ---

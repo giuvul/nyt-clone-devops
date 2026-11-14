@@ -4,6 +4,7 @@ const init = vi.fn();
 vi.mock("@sentry/react", () => ({
   init,
   browserTracingIntegration: () => ({ name: "BrowserTracing" }),
+  replayIntegration: () => ({ name: "Replay" }),
 }));
 
 const { initMonitoring } = await import("../src/monitoring/sentry.js");
@@ -31,8 +32,14 @@ describe("initMonitoring", () => {
         environment: "staging",
         release: "abc1234",
         sendDefaultPii: false,
+        tracesSampleRate: 0.1,
       }),
     );
+  });
+
+  it("samples every trace in development", () => {
+    initMonitoring({ VITE_SENTRY_DSN: "https://public@o0.ingest.sentry.io/0", MODE: "development" });
+    expect(init.mock.calls[0][0].tracesSampleRate).toBe(1);
   });
 
   it("falls back to the Vite mode when no environment is given", () => {
