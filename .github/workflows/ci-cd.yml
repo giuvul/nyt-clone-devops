@@ -1,8 +1,8 @@
 # Pipeline CI/CD del clone NYT.
 #
 #   push / PR ──► lint ─┐
-#                 test ─┼─► docker (build immagini + smoke test compose) ─┬─► deploy-staging    (push su develop)
-#          secret-scan ─┘                                                 └─► deploy-production (push su main)
+#                 test ─┼─► docker (build immagini + smoke test compose) ─┬─► deploy-staging    (push o avvio manuale su develop)
+#          secret-scan ─┘                                                 └─► deploy-production (push o avvio manuale su main)
 #
 # Se lint, test, scansione dei segreti o build del container falliscono, i
 # job di deploy non partono: il codice problematico non arriva online.
@@ -113,7 +113,7 @@ jobs:
   # ---------------------------------------------------------------- CD ----
   deploy-staging:
     name: Deploy staging (Netlify)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/develop'
     needs: docker
     runs-on: ubuntu-latest
     environment:
@@ -155,7 +155,7 @@ jobs:
 
   deploy-production:
     name: Deploy production (Netlify)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: docker
     runs-on: ubuntu-latest
     environment:
