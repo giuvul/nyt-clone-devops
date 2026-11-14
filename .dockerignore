@@ -1,0 +1,17 @@
+# Fuori dal contesto di build: dipendenze e build locali, git, documenti e
+# soprattutto i file con i segreti.
+node_modules
+dist
+coverage
+.git
+.github
+.netlify
+.env
+.env.*
+!.env.example
+docs
+presentazione
+*.md
+Dockerfile
+api.Dockerfile
+docker-compose.yml

@@ -1,0 +1,40 @@
+# Ambiente locale completo: front end (nginx) + back end (proxy NYT).
+#   cp .env.example .env    # poi inserisci NYT_API_KEY
+#   docker compose up --build
+#   http://localhost:8080
+name: nyt-clone
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: api.Dockerfile
+    image: nyt-clone-api:local
+    # La chiave arriva da .env (mai committato). Se .env manca il servizio
+    # parte lo stesso e /healthz segnala nytKeyConfigured: false.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PORT: "8787"
+    # Nessuna porta pubblicata: l'api è raggiungibile solo dal front end,
+    # sulla rete interna di compose.
+    expose:
+      - "8787"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: development
+        VITE_RELEASE: local
+    image: nyt-clone-frontend:local
+    ports:
+      - "8080:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

@@ -1,0 +1,196 @@
+# Pipeline CI/CD del clone NYT.
+#
+#   push / PR ──► lint ─┐
+#                 test ─┼─► docker (build immagini + smoke test compose) ─┬─► deploy-staging    (push su develop)
+#          secret-scan ─┘                                                 └─► deploy-production (push su main)
+#
+# Se lint, test, scansione dei segreti o build del container falliscono, i
+# job di deploy non partono: il codice problematico non arriva online.
+name: CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+# Permessi minimi per il GITHUB_TOKEN: la pipeline legge soltanto il codice.
+permissions:
+  contents: read
+
+# Una sola esecuzione per branch: un nuovo push annulla la CI vecchia, ma un
+# deploy di produzione già avviato non viene mai interrotto a metà.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  NODE_VERSION: "22"
+  NETLIFY_CLI: netlify-cli@27.11.2
+
+jobs:
+  # ---------------------------------------------------------------- CI ----
+  lint:
+    name: Lint (ESLint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      # --max-warnings=0: anche un solo warning fa fallire il job.
+      - run: npm run lint
+
+  test:
+    name: Unit test (Vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # tutta la history, non solo l'ultimo commit
+      # Cerca chiavi, token e password in ogni commit. --redact: se trova
+      # qualcosa lo segnala senza stampare il valore nel log.
+      - name: Scan full git history
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.28.0 \
+            git /repo --redact --verbose --exit-code 1
+      - name: Verify .env was never committed
+        run: |
+          if git log --all --format=%H -- .env | grep -q .; then
+            echo "::error::.env appears in the git history"
+            exit 1
+          fi
+          echo ".env is not in the history of any branch"
+
+  docker:
+    name: Build containers + smoke test
+    runs-on: ubuntu-latest
+    needs: [lint, test, secret-scan]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - name: Build images (frontend + api)
+        run: docker compose build
+      # Senza .env (in CI non esiste) l'api parte lo stesso e risponde 500
+      # su /api/*: basta per verificare che nginx inoltri al back end.
+      - name: Start the stack and wait for health checks
+        run: docker compose up -d --wait --wait-timeout 90
+      - name: Smoke test
+        run: |
+          set -e
+          check() { code=$(curl -s -o /dev/null -w '%{http_code}' "$1"); echo "$1 -> $code"; [ "$code" = "$2" ]; }
+          check http://localhost:8080/healthz 200
+          check http://localhost:8080/ 200
+          check http://localhost:8080/section/world 200
+          check http://localhost:8080/api/not-allowed 404
+          check http://localhost:8080/api/topstories/home 500
+      - name: Image sizes
+        run: docker images --format 'table {{.Repository}}\t{{.Tag}}\t{{.Size}}' | grep nyt-clone
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Stop the stack
+        if: always()
+        run: docker compose down
+
+  # ---------------------------------------------------------------- CD ----
+  deploy-staging:
+    name: Deploy staging (Netlify)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    needs: docker
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Build
+        run: npm run build && find dist -name "*.map" -delete
+        env:
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+          VITE_SENTRY_ENVIRONMENT: staging
+          VITE_RELEASE: ${{ github.sha }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+      - name: Verify no secret reached the public files
+        run: bash scripts/check-dist.sh
+        env:
+          NYT_API_KEY: ${{ secrets.NYT_API_KEY }}
+      - name: Deploy to the staging alias
+        id: deploy
+        run: |
+          npx --yes "$NETLIFY_CLI" deploy --no-build --dir=dist --functions=netlify/functions \
+            --alias=staging --message="staging ${GITHUB_SHA::7}" \
+            --secret-env="NYT_API_KEY=$NYT_API_KEY" --json > deploy.json
+          echo "url=$(jq -r '.deploy_url' deploy.json)" >> "$GITHUB_OUTPUT"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          NYT_API_KEY: ${{ secrets.NYT_API_KEY }}
+      - name: Post-deploy check
+        run: bash scripts/post-deploy-check.sh "${{ steps.deploy.outputs.url }}"
+
+  deploy-production:
+    name: Deploy production (Netlify)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: docker
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Build
+        run: npm run build && find dist -name "*.map" -delete
+        env:
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+          VITE_SENTRY_ENVIRONMENT: production
+          VITE_RELEASE: ${{ github.sha }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+      - name: Verify no secret reached the public files
+        run: bash scripts/check-dist.sh
+        env:
+          NYT_API_KEY: ${{ secrets.NYT_API_KEY }}
+      - name: Deploy to production
+        id: deploy
+        run: |
+          npx --yes "$NETLIFY_CLI" deploy --no-build --dir=dist --functions=netlify/functions \
+            --prod --message="production ${GITHUB_SHA::7}" \
+            --secret-env="NYT_API_KEY=$NYT_API_KEY" --json > deploy.json
+          echo "url=$(jq -r '.url' deploy.json)" >> "$GITHUB_OUTPUT"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          NYT_API_KEY: ${{ secrets.NYT_API_KEY }}
+      - name: Post-deploy check
+        run: bash scripts/post-deploy-check.sh "${{ steps.deploy.outputs.url }}"

@@ -1,0 +1,15 @@
+# Il sito Netlify NON è collegato al repository: lo pubblica solo la pipeline
+# GitHub Actions (netlify deploy --no-build), dopo che la CI è verde.
+# Questo file serve per la cartella pubblicata e i redirect.
+[build]
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+
+# Single page application: ogni percorso è gestito da React Router.
+# Le richieste /api/* sono servite prima dalla Netlify Function.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
