@@ -256,10 +256,19 @@ I primi tre girano in parallelo; il build dei container parte solo se tutti e tr
 deploy solo se anche il build dei container è verde. Una pipeline rossa blocca quindi il codice prima
 che arrivi online.
 
-**Fallimento visibile del linting.** Per dimostrarlo ho fatto un push con una variabile inutilizzata:
-il job *Lint* diventa rosso con l'annotazione `'unused' is assigned a value but never used` sulla
-riga del file, e i job a valle compaiono come *skipped*. Il commit successivo, che la rimuove,
-riporta tutto a verde. (Run e screenshot nella presentazione.)
+**Fallimento visibile del linting.** Per dimostrarlo ho aggiunto in `src/utils/format.js` una
+costante mai usata, `const WEEK = 7 * DAY;`. La prova ha insegnato qualcosa anche a me:
+
+1. [Primo push](https://github.com/giuvul/nyt-clone-devops/actions/runs/43604481312): la pipeline è
+   rimasta **verde**. La configurazione di ESLint ignorava le variabili con l'iniziale maiuscola
+   (`varsIgnorePattern: "^[A-Z_]"`, un'impostazione comune nei template React per i componenti usati
+   solo in JSX), e così ignorava anche le costanti come `WEEK`. ESLint 10 riconosce già l'uso dei
+   componenti in JSX, quindi l'eccezione non serviva: l'ho tolta.
+2. [Secondo push](https://github.com/giuvul/nyt-clone-devops/actions/runs/43604721923): con la
+   regola corretta il job *Lint* diventa **rosso** con l'annotazione
+   `'WEEK' is assigned a value but never used` su `src/utils/format.js#6`. Build dei container e
+   deploy compaiono come *skipped*: in produzione resta la versione precedente.
+3. Terzo push: la costante viene rimossa e la pipeline torna verde, con un nuovo deploy.
 
 Altri dettagli:
 - `concurrency`: un nuovo push sullo stesso branch annulla la run vecchia, ma un deploy di
